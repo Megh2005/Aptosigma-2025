@@ -20,12 +20,12 @@ export default function StoryReveal({ onContinue }: StoryRevealProps) {
     if (currentParagraph < paragraphs.length) {
       const timer = setTimeout(() => {
         setCurrentParagraph(prev => prev + 1);
-      }, 3000);
+      }, 2000);
       return () => clearTimeout(timer);
     } else {
       const timer = setTimeout(() => {
         setShowContinue(true);
-      }, 2000);
+      }, 1000);
       return () => clearTimeout(timer);
     }
   }, [currentParagraph, paragraphs.length]);

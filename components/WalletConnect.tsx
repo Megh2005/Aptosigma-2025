@@ -79,8 +79,6 @@ export default function WalletConnect({ onConnected }: WalletConnectProps) {
       }
     } catch (error) {
       console.error('Error saving wallet to Firebase:', error);
-      // Don't throw error to prevent blocking wallet connection
-      // Just log it for monitoring
     }
   };
 
