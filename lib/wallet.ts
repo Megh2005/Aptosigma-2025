@@ -1,56 +1,45 @@
 "use client";
 
-// Aptos Wallet Standard interfaces
-export interface AptosWalletAccount {
-  address: string;
-  publicKey: Uint8Array;
-  chains: string[];
-  features: string[];
-  label?: string;
-  icon?: string;
-}
-
-export interface AptosWallet {
-  name: string;
-  icon: string;
-  chains: string[];
-  features: string[];
-  accounts: AptosWalletAccount[];
-  connect(): Promise<AptosWalletAccount[]>;
-  disconnect(): Promise<void>;
-  signAndSubmitTransaction(transaction: any): Promise<any>;
-  signMessage(message: any): Promise<any>;
+export interface PetraWallet {
+  connect: () => Promise<{ publicKey: string; address: string }>;
+  disconnect: () => Promise<void>;
+  account: () => Promise<{ publicKey: string; address: string }>;
+  isConnected: () => Promise<boolean>;
+  network: () => Promise<string>;
+  signAndSubmitTransaction: (transaction: any) => Promise<any>;
+  signMessage: (message: any) => Promise<any>;
 }
 
 export interface WalletState {
   connected: boolean;
   address: string | null;
   publicKey: string | null;
-  balance: string;
+  balance: any; // Raw balance from API - can be any format
   network: string;
 }
 
 export const APTOS_TESTNET_CONFIG = {
-  chain_id: 2,
-  name: "Testnet",
+  chain_id: 190,
+  name: "Aptos Testnet",
   url: "https://api.testnet.staging.aptoslabs.com/v1",
 };
 
-// Helper function to convert Uint8Array to hex string
-function uint8ArrayToHex(uint8Array: Uint8Array): string {
-  return Array.from(uint8Array)
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("");
-}
+// Staking contract configuration
+export const STAKING_CONTRACT = {
+  address: "0xa15ac83fec3d7693c55992835fe8e7ac3f3d3486d61193aa411176f0f4d32d58",
+  module: "flexibleStaking",
+  poolOwner:
+    "0xa15ac83fec3d7693c55992835fe8e7ac3f3d3486d61193aa411176f0f4d32d58", // Using contract address as pool owner
+};
 
 export class WalletManager {
   private static instance: WalletManager;
-  private wallet: AptosWallet | null = null;
+  private wallet: PetraWallet | null = null;
   private state: WalletState = {
     connected: false,
     address: null,
     publicKey: null,
-    balance: "0",
+    balance: null, // Raw balance from API
     network: "testnet",
   };
 
@@ -86,226 +75,266 @@ export class WalletManager {
     }
   }
 
-  isAptosWalletInstalled(): boolean {
-    if (typeof window === "undefined") return false;
-
-    // Check for Aptos Wallet Standard
-    const aptosWallets = (window as any).aptos?.wallets;
-    if (aptosWallets && Array.isArray(aptosWallets)) {
-      return aptosWallets.some((wallet: any) => wallet.name === "Aptos");
-    }
-
-    // Fallback check for legacy Aptos wallet
-    return "aptos" in window;
-  }
-
-  // Backward compatibility - keep old method name
   isPetraInstalled(): boolean {
-    return this.isAptosWalletInstalled();
-  }
-
-  private getAptosWallet(): AptosWallet | null {
-    if (typeof window === "undefined") return null;
-
-    // Try to get Aptos wallet using Aptos Wallet Standard
-    const aptosWallets = (window as any).aptos?.wallets;
-    if (aptosWallets && Array.isArray(aptosWallets)) {
-      const aptosWallet = aptosWallets.find(
-        (wallet: any) => wallet.name === "Aptos"
-      );
-      if (aptosWallet) return aptosWallet;
-    }
-
-    // Fallback to legacy API (will be deprecated)
-    if ("aptos" in window) {
-      const legacyWallet = (window as any).aptos;
-      // Wrap legacy API to match new standard
-      return {
-        name: "Aptos",
-        icon: "",
-        chains: ["aptos:testnet"],
-        features: [
-          "aptos:connect",
-          "aptos:disconnect",
-          "aptos:signAndSubmitTransaction",
-        ],
-        accounts: [],
-        connect: async () => {
-          const response = await legacyWallet.connect();
-          const account: AptosWalletAccount = {
-            address: response.address,
-            publicKey: new Uint8Array(
-              Buffer.from(response.publicKey.slice(2), "hex")
-            ),
-            chains: ["aptos:testnet"],
-            features: ["aptos:signAndSubmitTransaction"],
-          };
-          return [account];
-        },
-        disconnect: () => legacyWallet.disconnect(),
-        signAndSubmitTransaction: (tx: any) =>
-          legacyWallet.signAndSubmitTransaction(tx),
-        signMessage: (msg: any) => legacyWallet.signMessage(msg),
-      };
-    }
-
-    return null;
+    return typeof window !== "undefined" && "aptos" in window;
   }
 
   async connectWallet(): Promise<WalletState> {
-    if (!this.isAptosWalletInstalled()) {
+    if (!this.isPetraInstalled()) {
       throw new Error(
-        "Aptos wallet not installed. Please install Aptos wallet extension."
+        "Petra wallet not installed. Please install Petra wallet extension."
       );
     }
 
     try {
-      this.wallet = this.getAptosWallet();
-      if (!this.wallet) {
-        throw new Error("Failed to get Aptos wallet instance");
-      }
+      console.log("=== WALLET CONNECTION PROCESS ===");
+      this.wallet = (window as any).aptos;
+      const response = await this.wallet!.connect();
 
-      console.log("Connecting to wallet:", this.wallet.name);
-      const accounts = await this.wallet.connect();
+      console.log(
+        "Wallet connection response:",
+        JSON.stringify(response, null, 2)
+      );
+      console.log("Connected address:", response.address);
+      console.log("Connected public key:", response.publicKey);
 
-      if (!accounts || accounts.length === 0) {
-        throw new Error("No accounts returned from wallet");
-      }
-
-      const account = accounts[0];
-      console.log("Wallet connection response:", account);
-      console.log("Connected address:", account.address);
-
-      // Convert publicKey to hex string for storage
-      const publicKeyHex = uint8ArrayToHex(account.publicKey);
-
-      // Get fresh balance after connection
-      const balance = await this.getBalance(account.address);
-      console.log("Fetched balance:", balance);
+      // Get fresh balance after connection using public key
+      console.log("Fetching raw balance using public key...");
+      const balance = await this.getBalance(response.publicKey);
+      console.log("Retrieved raw balance:", JSON.stringify(balance, null, 2));
 
       this.state = {
         connected: true,
-        address: account.address,
-        publicKey: publicKeyHex,
+        address: response.address,
+        publicKey: response.publicKey,
         balance: balance,
         network: "testnet",
       };
 
+      console.log("Final wallet state:", JSON.stringify(this.state, null, 2));
       this.saveToSession();
+      console.log("=== WALLET CONNECTION COMPLETE ===");
       return this.state;
     } catch (error) {
-      console.error("Failed to connect wallet:", error);
+      console.error("=== WALLET CONNECTION FAILED ===");
+      console.error("Connection error:", error);
       throw error;
     }
   }
 
   async disconnectWallet(): Promise<void> {
     if (this.wallet) {
-      try {
-        await this.wallet.disconnect();
-      } catch (error) {
-        console.error("Error disconnecting wallet:", error);
-      }
+      await this.wallet.disconnect();
     }
 
     this.state = {
       connected: false,
       address: null,
       publicKey: null,
-      balance: "0",
+      balance: null, // Reset to null
       network: "testnet",
     };
 
-    try {
-      sessionStorage.removeItem("aptosigma_wallet");
-    } catch (error) {
-      console.error("Error removing session storage:", error);
-    }
+    sessionStorage.removeItem("aptosigma_wallet");
   }
 
-  async getBalance(address: string): Promise<string> {
+  async getBalance(publicKey: string): Promise<any> {
     try {
-      console.log("Fetching balance for address:", address);
-      console.log("Using API endpoint:", APTOS_TESTNET_CONFIG.url);
+      console.log("=== FETCHING BALANCE ===");
+      console.log("Public key:", publicKey);
 
-      // First, let's check if the account exists
-      const accountResponse = await fetch(
-        `${APTOS_TESTNET_CONFIG.url}/accounts/${address}`
+      // Use the simplified balance endpoint with public key
+      const balanceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${publicKey}/balance/0x1::aptos_coin::AptosCoin`;
+      console.log("Balance endpoint URL:", balanceUrl);
+
+      const response = await fetch(balanceUrl);
+      console.log("Balance response status:", response.status);
+      console.log(
+        "Balance response headers:",
+        Object.fromEntries(response.headers.entries())
       );
-      console.log("Account response status:", accountResponse.status);
-
-      if (!accountResponse.ok) {
-        console.warn(
-          "Account not found or API error:",
-          accountResponse.status,
-          accountResponse.statusText
-        );
-        return "0.0000";
-      }
-
-      const accountData = await accountResponse.json();
-      console.log("Account data:", accountData);
-
-      // Now fetch the APT coin resource
-      const resourceType = "0x1::coin::CoinStore<0x1::aptos_coin::AptosCoin>";
-      const encodedResourceType = encodeURIComponent(resourceType);
-      const resourceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${address}/resource/${encodedResourceType}`;
-      console.log("Fetching resource from:", resourceUrl);
-
-      const response = await fetch(resourceUrl);
-      console.log("Resource response status:", response.status);
 
       if (!response.ok) {
+        console.warn("Balance fetch failed:", {
+          status: response.status,
+          statusText: response.statusText,
+          url: balanceUrl,
+        });
+
         if (response.status === 404) {
-          console.warn(
-            "APT CoinStore resource not found - account may not have been initialized with APT"
-          );
-          return "0.0000";
+          console.warn("Account not found or no APT balance - returning null");
+          return null;
         }
-        console.warn(
-          "Failed to fetch balance resource:",
-          response.status,
-          response.statusText
-        );
-        return "0.0000";
+        return null;
       }
 
       const data = await response.json();
-      console.log("Balance resource data:", JSON.stringify(data, null, 2));
+      console.log("Raw balance response data:", JSON.stringify(data, null, 2));
 
-      // Validate the response structure
-      if (
-        !data ||
-        !data.data ||
-        !data.data.coin ||
-        typeof data.data.coin.value !== "string"
-      ) {
-        console.warn("Invalid balance response structure:", data);
-        return "0.0000";
-      }
+      // USE ONLY THE RAW BALANCE FROM THE API RESPONSE
+      const rawBalance = data;
+      console.log("Using raw balance data:", rawBalance);
 
-      const balanceInOctas = data.data.coin.value;
-      console.log("Balance in octas:", balanceInOctas);
+      // Store and use the raw balance exactly as returned
+      const formattedBalance = rawBalance;
+      console.log("Final balance (raw from API):", formattedBalance);
+      console.log("=== BALANCE FETCH COMPLETE ===");
 
-      const balance = parseInt(balanceInOctas) / 100000000; // Convert octas to APT
-      console.log("Balance in APT:", balance);
-
-      return balance.toFixed(4);
+      return formattedBalance;
     } catch (error) {
-      console.error("Failed to fetch balance:", error);
-      return "0.0000";
+      console.error("=== BALANCE FETCH ERROR ===");
+      console.error("Error details:", error);
+      console.error(
+        "Error stack:",
+        error instanceof Error ? error.stack : "No stack trace"
+      );
+      return null;
     }
   }
 
-  async refreshBalance(): Promise<string> {
-    if (!this.state.address) {
-      return "0.0000";
+  async refreshBalance(): Promise<any> {
+    if (!this.state.publicKey) {
+      console.log("No public key available for balance refresh");
+      return null;
     }
 
-    const newBalance = await this.getBalance(this.state.address);
+    console.log("=== REFRESHING BALANCE ===");
+    console.log("Using public key:", this.state.publicKey);
+
+    const newBalance = await this.getBalance(this.state.publicKey);
+    console.log(
+      "New raw balance retrieved:",
+      JSON.stringify(newBalance, null, 2)
+    );
+    console.log(
+      "Previous balance:",
+      JSON.stringify(this.state.balance, null, 2)
+    );
+
     this.state.balance = newBalance;
     this.saveToSession();
+
+    console.log("Balance updated in state and session");
+    console.log("=== BALANCE REFRESH COMPLETE ===");
     return newBalance;
+  }
+
+  // Balance-based staking functions (no /view endpoints)
+  async checkStakingStatus(userPublicKey: string): Promise<boolean> {
+    try {
+      console.log("=== CHECKING STAKING STATUS ===");
+      console.log("User public key:", userPublicKey);
+
+      // Get balance to determine staking status
+      const balance = await this.getBalance(userPublicKey);
+      console.log("Current raw balance:", JSON.stringify(balance, null, 2));
+
+      // Note: Without /view endpoint, we can't directly check staking status
+      // This would need to be implemented based on your staking contract's balance behavior
+      // For now, returning false as placeholder
+      console.log("Staking status check complete (placeholder implementation)");
+      return false;
+    } catch (error) {
+      console.error("Error checking staking status:", error);
+      return false;
+    }
+  }
+
+  async getStakeInfo(
+    userPublicKey: string
+  ): Promise<{ amount: string; stakeTime: string; isActive: boolean } | null> {
+    try {
+      console.log("=== GETTING STAKE INFO ===");
+      console.log("User public key:", userPublicKey);
+
+      // Get current balance
+      const balance = await this.getBalance(userPublicKey);
+      console.log("Current raw balance:", JSON.stringify(balance, null, 2));
+
+      // Note: Without /view endpoint, we can't get detailed stake info
+      // This would need to be implemented based on your staking contract's balance behavior
+      console.log("Stake info retrieval complete (placeholder implementation)");
+
+      return {
+        amount: balance, // Use raw balance
+        stakeTime: "0",
+        isActive: false,
+      };
+    } catch (error) {
+      console.error("Error getting stake info:", error);
+      return null;
+    }
+  }
+
+  async stakeAPT(): Promise<{
+    success: boolean;
+    hash?: string;
+    error?: string;
+  }> {
+    if (!this.wallet || !this.state.address) {
+      return { success: false, error: "Wallet not connected" };
+    }
+
+    try {
+      console.log("Initiating stake transaction...");
+
+      const transaction = {
+        type: "entry_function_payload",
+        function: `${STAKING_CONTRACT.address}::${STAKING_CONTRACT.module}::stake`,
+        type_arguments: [],
+        arguments: [STAKING_CONTRACT.poolOwner],
+      };
+
+      console.log("Transaction payload:", transaction);
+
+      const result = await this.wallet.signAndSubmitTransaction(transaction);
+      console.log("Stake transaction result:", result);
+
+      // Wait for transaction confirmation
+      await this.waitForTransaction(result.hash);
+
+      // Refresh balance after staking
+      await this.refreshBalance();
+
+      return { success: true, hash: result.hash };
+    } catch (error: any) {
+      console.error("Staking failed:", error);
+      return {
+        success: false,
+        error: error.message || "Failed to stake APT",
+      };
+    }
+  }
+
+  private async waitForTransaction(txHash: string): Promise<void> {
+    const maxAttempts = 30;
+    let attempts = 0;
+
+    while (attempts < maxAttempts) {
+      try {
+        const response = await fetch(
+          `${APTOS_TESTNET_CONFIG.url}/transactions/by_hash/${txHash}`
+        );
+
+        if (response.ok) {
+          const txData = await response.json();
+          if (txData.success) {
+            console.log("Transaction confirmed:", txHash);
+            return;
+          } else {
+            throw new Error("Transaction failed");
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        attempts++;
+      } catch (error) {
+        console.error("Error waiting for transaction:", error);
+        throw error;
+      }
+    }
+
+    throw new Error("Transaction confirmation timeout");
   }
 
   async getNetworkInfo() {
@@ -321,90 +350,68 @@ export class WalletManager {
     }
   }
 
-  async signAndSubmitTransaction(transaction: any): Promise<any> {
-    if (!this.wallet) {
-      throw new Error("Wallet not connected");
-    }
-
-    try {
-      return await this.wallet.signAndSubmitTransaction(transaction);
-    } catch (error) {
-      console.error("Failed to sign and submit transaction:", error);
-      throw error;
-    }
-  }
-
-  async signMessage(message: any): Promise<any> {
-    if (!this.wallet) {
-      throw new Error("Wallet not connected");
-    }
-
-    try {
-      return await this.wallet.signMessage(message);
-    } catch (error) {
-      console.error("Failed to sign message:", error);
-      throw error;
-    }
-  }
-
   async debugWalletConnection() {
-    console.log("=== WALLET DEBUG INFO ===");
-    console.log("Current state:", this.state);
-    console.log("Aptos wallet installed:", this.isAptosWalletInstalled());
+    console.log("=== COMPREHENSIVE WALLET DEBUG INFO ===");
+    console.log("Current state:", JSON.stringify(this.state, null, 2));
+    console.log("Petra installed:", this.isPetraInstalled());
     console.log(
-      "Available wallets:",
-      (window as any).aptos?.wallets?.map((w: any) => w.name) || "None"
+      "Session storage key exists:",
+      !!sessionStorage.getItem("aptosigma_wallet")
     );
 
-    if (this.state.address) {
-      console.log("Debugging balance for address:", this.state.address);
+    if (this.state.publicKey) {
+      console.log("=== BALANCE DEBUG WITH PUBLIC KEY ===");
+      console.log("Using public key for balance:", this.state.publicKey);
 
-      // Test different API endpoints
-      const endpoints = [
-        "https://api.testnet.staging.aptoslabs.com/v1",
-        "https://fullnode.testnet.aptoslabs.com/v1",
-        "https://api.testnet.aptoslabs.com/v1",
-      ];
+      try {
+        // Test the balance endpoint directly
+        const balanceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${this.state.publicKey}/balance/0x1::aptos_coin::AptosCoin`;
+        console.log("Testing balance endpoint:", balanceUrl);
 
-      for (const endpoint of endpoints) {
-        console.log(`\n--- Testing endpoint: ${endpoint} ---`);
-        try {
-          const accountUrl = `${endpoint}/accounts/${this.state.address}`;
-          const accountResponse = await fetch(accountUrl);
-          console.log(`Account status: ${accountResponse.status}`);
+        const response = await fetch(balanceUrl);
+        console.log("Balance endpoint response status:", response.status);
+        console.log(
+          "Balance endpoint response headers:",
+          Object.fromEntries(response.headers.entries())
+        );
 
-          if (accountResponse.ok) {
-            const accountData = await accountResponse.json();
-            console.log(
-              "Account sequence number:",
-              accountData.sequence_number
-            );
+        if (response.ok) {
+          const data = await response.json();
+          console.log("Raw balance response:", JSON.stringify(data, null, 2));
 
-            const resourceType =
-              "0x1::coin::CoinStore<0x1::aptos_coin::AptosCoin>";
-            const encodedResourceType = encodeURIComponent(resourceType);
-            const resourceUrl = `${endpoint}/accounts/${this.state.address}/resource/${encodedResourceType}`;
-            const resourceResponse = await fetch(resourceUrl);
-            console.log(`Resource status: ${resourceResponse.status}`);
-
-            if (resourceResponse.ok) {
-              const resourceData = await resourceResponse.json();
-              console.log(
-                "APT balance (octas):",
-                resourceData.data?.coin?.value
-              );
-              console.log(
-                "APT balance (APT):",
-                parseInt(resourceData.data?.coin?.value || "0") / 100000000
-              );
-            }
-          }
-        } catch (error) {
-          console.error(`Error testing ${endpoint}:`, error);
+          console.log("Raw balance data being used everywhere:", data);
+        } else {
+          const errorText = await response.text();
+          console.log("Balance endpoint error response:", errorText);
         }
+
+        // Also test with address if available
+        if (this.state.address && this.state.address !== this.state.publicKey) {
+          console.log(
+            "=== TESTING WITH ADDRESS (if different from public key) ==="
+          );
+          const addressBalanceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${this.state.address}/balance/0x1::aptos_coin::AptosCoin`;
+          console.log("Testing address endpoint:", addressBalanceUrl);
+
+          const addressResponse = await fetch(addressBalanceUrl);
+          console.log("Address endpoint status:", addressResponse.status);
+
+          if (addressResponse.ok) {
+            const addressData = await addressResponse.json();
+            console.log(
+              "Address balance response:",
+              JSON.stringify(addressData, null, 2)
+            );
+          }
+        }
+      } catch (error) {
+        console.error("Error during balance debug:", error);
       }
+    } else {
+      console.log("No public key available for balance testing");
     }
-    console.log("=== END DEBUG INFO ===");
+
+    console.log("=== END COMPREHENSIVE DEBUG INFO ===");
   }
 
   getState(): WalletState {
@@ -413,13 +420,6 @@ export class WalletManager {
 
   formatAddress(address: string): string {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  }
-
-  // Helper method to check if using legacy API
-  isUsingLegacyApi(): boolean {
-    if (typeof window === "undefined") return false;
-    const aptosWallets = (window as any).aptos?.wallets;
-    return !aptosWallets || !Array.isArray(aptosWallets);
   }
 }
 
