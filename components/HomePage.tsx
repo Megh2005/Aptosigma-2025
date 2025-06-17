@@ -59,11 +59,6 @@ export default function HomePage({ walletState, onStartGame }: HomePageProps) {
     }
   };
 
-  const handleDebugWallet = async () => {
-    await walletManager.debugWalletConnection();
-    setShowDebug(true);
-  };
-
   const aptosEcosystem = [
     { name: 'Petra Wallet', description: 'Gateway to the Aptos realm' },
     { name: 'Pontem Network', description: 'Bridge between worlds' },
@@ -113,13 +108,6 @@ export default function HomePage({ walletState, onStartGame }: HomePageProps) {
               TESTNET CONNECTED
             </Badge>
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDebugWallet}
-              >
-                <Bug size={16} />
-              </Button>
               <Button
                 variant="outline"
                 size="sm"
