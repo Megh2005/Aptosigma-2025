@@ -14,7 +14,7 @@ export interface WalletState {
   connected: boolean;
   address: string | null;
   publicKey: string | null;
-  balance: any; // Raw balance from API - can be any format
+  balance: any;
   network: string;
 }
 
@@ -24,12 +24,11 @@ export const APTOS_TESTNET_CONFIG = {
   url: "https://api.testnet.staging.aptoslabs.com/v1",
 };
 
-// Staking contract configuration
 export const STAKING_CONTRACT = {
-  address: "0xa15ac83fec3d7693c55992835fe8e7ac3f3d3486d61193aa411176f0f4d32d58",
+  address: "0x4afbef1832e39a9e7f4ca7434bcf216e4d2864f9da4003d2627558928ac30f54",
   module: "flexibleStaking",
   poolOwner:
-    "0xa15ac83fec3d7693c55992835fe8e7ac3f3d3486d61193aa411176f0f4d32d58", // Using contract address as pool owner
+    "0x4afbef1832e39a9e7f4ca7434bcf216e4d2864f9da4003d2627558928ac30f54",
 };
 
 export class WalletManager {
@@ -39,7 +38,7 @@ export class WalletManager {
     connected: false,
     address: null,
     publicKey: null,
-    balance: null, // Raw balance from API
+    balance: null,
     network: "testnet",
   };
 
@@ -63,7 +62,7 @@ export class WalletManager {
         this.state = { ...this.state, ...JSON.parse(saved) };
       }
     } catch (error) {
-      console.error("Failed to load wallet state from session:", error);
+      // Silent error handling
     }
   }
 
@@ -71,7 +70,7 @@ export class WalletManager {
     try {
       sessionStorage.setItem("aptosigma_wallet", JSON.stringify(this.state));
     } catch (error) {
-      console.error("Failed to save wallet state to session:", error);
+      // Silent error handling
     }
   }
 
@@ -87,21 +86,11 @@ export class WalletManager {
     }
 
     try {
-      console.log("=== WALLET CONNECTION PROCESS ===");
       this.wallet = (window as any).aptos;
       const response = await this.wallet!.connect();
 
-      console.log(
-        "Wallet connection response:",
-        JSON.stringify(response, null, 2)
-      );
-      console.log("Connected address:", response.address);
-      console.log("Connected public key:", response.publicKey);
-
-      // Get fresh balance after connection using public key
-      console.log("Fetching raw balance using public key...");
-      const balance = await this.getBalance(response.publicKey);
-      console.log("Retrieved raw balance:", JSON.stringify(balance, null, 2));
+      const balance = await this.getBalance(response.address);
+      console.log("Connect wallet - final balance:", balance);
 
       this.state = {
         connected: true,
@@ -111,13 +100,9 @@ export class WalletManager {
         network: "testnet",
       };
 
-      console.log("Final wallet state:", JSON.stringify(this.state, null, 2));
       this.saveToSession();
-      console.log("=== WALLET CONNECTION COMPLETE ===");
       return this.state;
     } catch (error) {
-      console.error("=== WALLET CONNECTION FAILED ===");
-      console.error("Connection error:", error);
       throw error;
     }
   }
@@ -131,142 +116,96 @@ export class WalletManager {
       connected: false,
       address: null,
       publicKey: null,
-      balance: null, // Reset to null
+      balance: null,
       network: "testnet",
     };
 
     sessionStorage.removeItem("aptosigma_wallet");
   }
 
-  async getBalance(publicKey: string): Promise<any> {
+  async getBalance(address: string): Promise<any> {
     try {
-      console.log("=== FETCHING BALANCE ===");
-      console.log("Public key:", publicKey);
-
-      // Use the simplified balance endpoint with public key
-      const balanceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${publicKey}/balance/0x1::aptos_coin::AptosCoin`;
-      console.log("Balance endpoint URL:", balanceUrl);
-
+      const balanceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${address}/balance/0x1::aptos_coin::AptosCoin`;
       const response = await fetch(balanceUrl);
-      console.log("Balance response status:", response.status);
-      console.log(
-        "Balance response headers:",
-        Object.fromEntries(response.headers.entries())
-      );
 
       if (!response.ok) {
-        console.warn("Balance fetch failed:", {
-          status: response.status,
-          statusText: response.statusText,
-          url: balanceUrl,
-        });
-
         if (response.status === 404) {
-          console.warn("Account not found or no APT balance - returning null");
+          console.log("Balance API response (404 - not found):", null);
           return null;
         }
+        console.log("Balance API response (error):", null);
         return null;
       }
 
       const data = await response.json();
-      console.log("Raw balance response data:", JSON.stringify(data, null, 2));
-
-      // USE ONLY THE RAW BALANCE FROM THE API RESPONSE
-      const rawBalance = data;
-      console.log("Using raw balance data:", rawBalance);
-
-      // Store and use the raw balance exactly as returned
-      const formattedBalance = rawBalance;
-      console.log("Final balance (raw from API):", formattedBalance);
-      console.log("=== BALANCE FETCH COMPLETE ===");
-
-      return formattedBalance;
+      console.log("Balance API response:", data);
+      return data;
     } catch (error) {
-      console.error("=== BALANCE FETCH ERROR ===");
-      console.error("Error details:", error);
-      console.error(
-        "Error stack:",
-        error instanceof Error ? error.stack : "No stack trace"
-      );
+      console.log("Balance API response (catch error):", null);
       return null;
     }
   }
 
   async refreshBalance(): Promise<any> {
-    if (!this.state.publicKey) {
-      console.log("No public key available for balance refresh");
+    if (!this.state.address) {
+      console.log("Refresh balance - no address available:", null);
       return null;
     }
 
-    console.log("=== REFRESHING BALANCE ===");
-    console.log("Using public key:", this.state.publicKey);
-
-    const newBalance = await this.getBalance(this.state.publicKey);
-    console.log(
-      "New raw balance retrieved:",
-      JSON.stringify(newBalance, null, 2)
-    );
-    console.log(
-      "Previous balance:",
-      JSON.stringify(this.state.balance, null, 2)
-    );
-
+    const newBalance = await this.getBalance(this.state.address);
+    console.log("Refresh balance result:", newBalance);
     this.state.balance = newBalance;
     this.saveToSession();
 
-    console.log("Balance updated in state and session");
-    console.log("=== BALANCE REFRESH COMPLETE ===");
     return newBalance;
   }
 
-  // Balance-based staking functions (no /view endpoints)
-  async checkStakingStatus(userPublicKey: string): Promise<boolean> {
+  async checkContractInitialized(moduleAddress?: string): Promise<boolean> {
     try {
-      console.log("=== CHECKING STAKING STATUS ===");
-      console.log("User public key:", userPublicKey);
+      const contractAddress = moduleAddress || STAKING_CONTRACT.address;
 
-      // Get balance to determine staking status
-      const balance = await this.getBalance(userPublicKey);
-      console.log("Current raw balance:", JSON.stringify(balance, null, 2));
+      // Check if the contract has been initialized by trying to access a resource that should exist after initialization
+      // We'll check for the StakingPool resource or similar
+      const resourceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${contractAddress}/resource/${contractAddress}::${STAKING_CONTRACT.module}::StakingPool`;
+      const response = await fetch(resourceUrl);
 
-      // Note: Without /view endpoint, we can't directly check staking status
-      // This would need to be implemented based on your staking contract's balance behavior
-      // For now, returning false as placeholder
-      console.log("Staking status check complete (placeholder implementation)");
+      if (response.ok) {
+        const resourceData = await response.json();
+        console.log(
+          "Contract initialization check - resource found:",
+          resourceData
+        );
+        return true;
+      }
+
+      // Alternative check: Look for any resources under the contract address
+      const accountUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${contractAddress}/resources`;
+      const accountResponse = await fetch(accountUrl);
+
+      if (accountResponse.ok) {
+        const resources = await accountResponse.json();
+        console.log("Contract resources:", resources);
+
+        // Check if any staking-related resources exist
+        const hasStakingResources = resources.some(
+          (resource: any) =>
+            resource.type.includes(STAKING_CONTRACT.module) ||
+            resource.type.includes("StakingPool") ||
+            resource.type.includes("Pool")
+        );
+
+        return hasStakingResources;
+      }
+
+      console.log("Contract not initialized - no resources found");
       return false;
     } catch (error) {
-      console.error("Error checking staking status:", error);
+      console.error("Error checking contract initialization:", error);
       return false;
     }
   }
 
-  async getStakeInfo(
-    userPublicKey: string
-  ): Promise<{ amount: string; stakeTime: string; isActive: boolean } | null> {
-    try {
-      console.log("=== GETTING STAKE INFO ===");
-      console.log("User public key:", userPublicKey);
-
-      // Get current balance
-      const balance = await this.getBalance(userPublicKey);
-      console.log("Current raw balance:", JSON.stringify(balance, null, 2));
-
-      // Note: Without /view endpoint, we can't get detailed stake info
-      // This would need to be implemented based on your staking contract's balance behavior
-      console.log("Stake info retrieval complete (placeholder implementation)");
-
-      return {
-        amount: balance, // Use raw balance
-        stakeTime: "0",
-        isActive: false,
-      };
-    } catch (error) {
-      console.error("Error getting stake info:", error);
-      return null;
-    }
-  }
-
-  async stakeAPT(): Promise<{
+  async initializeContract(moduleAddress?: string): Promise<{
     success: boolean;
     hash?: string;
     error?: string;
@@ -276,29 +215,154 @@ export class WalletManager {
     }
 
     try {
-      console.log("Initiating stake transaction...");
+      const contractAddress = moduleAddress || STAKING_CONTRACT.address;
+
+      console.log("Initializing contract at:", contractAddress);
+
+      // Call the initialize function on the contract
+      const transaction = {
+        type: "entry_function_payload",
+        function: `${contractAddress}::${STAKING_CONTRACT.module}::initialize`,
+        type_arguments: [],
+        arguments: [], // Most initialize functions don't require arguments, but you might need to adjust this
+      };
+
+      console.log("Submitting initialization transaction:", transaction);
+
+      const result = await this.wallet.signAndSubmitTransaction(transaction);
+      console.log("Initialization transaction submitted:", result);
+
+      await this.waitForTransaction(result.hash);
+      console.log("Contract initialized successfully");
+
+      return { success: true, hash: result.hash };
+    } catch (error: any) {
+      console.error("Contract initialization error:", error);
+      return {
+        success: false,
+        error: error.message || "Failed to initialize contract",
+      };
+    }
+  }
+
+  async ensureContractInitialized(moduleAddress?: string): Promise<{
+    success: boolean;
+    hash?: string;
+    error?: string;
+  }> {
+    const isInitialized = await this.checkContractInitialized(moduleAddress);
+
+    if (isInitialized) {
+      console.log("Contract already initialized");
+      return { success: true };
+    }
+
+    console.log("Contract not initialized, initializing now...");
+    return await this.initializeContract(moduleAddress);
+  }
+
+  async checkStakingStatus(
+    userAddress: string,
+    moduleAddress?: string
+  ): Promise<boolean> {
+    try {
+      const contractAddress = moduleAddress || STAKING_CONTRACT.address;
+
+      // Try to get the user's stake information from the contract
+      const resourceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${userAddress}/resource/${contractAddress}::${STAKING_CONTRACT.module}::StakeInfo`;
+      const response = await fetch(resourceUrl);
+
+      if (response.ok) {
+        const stakeData = await response.json();
+        return stakeData.data && stakeData.data.amount > 0;
+      }
+
+      return false;
+    } catch (error) {
+      console.error("Error checking staking status:", error);
+      return false;
+    }
+  }
+
+  async getStakeInfo(
+    userAddress: string,
+    moduleAddress?: string
+  ): Promise<{ amount: string; stakeTime: string; isActive: boolean } | null> {
+    try {
+      const contractAddress = moduleAddress || STAKING_CONTRACT.address;
+
+      // Try to get the user's stake information from the contract
+      const resourceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${userAddress}/resource/${contractAddress}::${STAKING_CONTRACT.module}::StakeInfo`;
+      const response = await fetch(resourceUrl);
+
+      if (response.ok) {
+        const stakeData = await response.json();
+        return {
+          amount: stakeData.data.amount || "0",
+          stakeTime: stakeData.data.stake_time || "0",
+          isActive: stakeData.data.is_active || false,
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Error getting stake info:", error);
+      return null;
+    }
+  }
+
+  async stakeAPT(moduleAddress?: string): Promise<{
+    success: boolean;
+    hash?: string;
+    error?: string;
+  }> {
+    if (!this.wallet || !this.state.address) {
+      return { success: false, error: "Wallet not connected" };
+    }
+
+    try {
+      // First, ensure the contract is initialized
+      const initResult = await this.ensureContractInitialized(moduleAddress);
+      if (!initResult.success) {
+        return {
+          success: false,
+          error: `Contract initialization failed: ${initResult.error}`,
+        };
+      }
+
+      const contractAddress = moduleAddress || STAKING_CONTRACT.address;
+
+      console.log("Staking APT with contract:", contractAddress);
 
       const transaction = {
         type: "entry_function_payload",
-        function: `${STAKING_CONTRACT.address}::${STAKING_CONTRACT.module}::stake`,
+        function: `${contractAddress}::${STAKING_CONTRACT.module}::stake`,
         type_arguments: [],
         arguments: [STAKING_CONTRACT.poolOwner],
       };
 
-      console.log("Transaction payload:", transaction);
+      console.log("Submitting staking transaction:", transaction);
 
       const result = await this.wallet.signAndSubmitTransaction(transaction);
-      console.log("Stake transaction result:", result);
+      console.log("Staking transaction submitted:", result);
 
-      // Wait for transaction confirmation
       await this.waitForTransaction(result.hash);
-
-      // Refresh balance after staking
       await this.refreshBalance();
 
+      console.log("Staking completed successfully");
       return { success: true, hash: result.hash };
     } catch (error: any) {
-      console.error("Staking failed:", error);
+      console.error("Staking error:", error);
+
+      // Check if it's still an initialization error
+      if (error.message && error.message.includes("E_NOT_INITIALIZED")) {
+        return {
+          success: false,
+          error:
+            "Contract is not properly initialized. Please contact the contract owner to initialize the staking pool.",
+        };
+      }
+
       return {
         success: false,
         error: error.message || "Failed to stake APT",
@@ -319,17 +383,15 @@ export class WalletManager {
         if (response.ok) {
           const txData = await response.json();
           if (txData.success) {
-            console.log("Transaction confirmed:", txHash);
             return;
           } else {
-            throw new Error("Transaction failed");
+            throw new Error(`Transaction failed: ${JSON.stringify(txData)}`);
           }
         }
 
         await new Promise((resolve) => setTimeout(resolve, 1000));
         attempts++;
       } catch (error) {
-        console.error("Error waiting for transaction:", error);
         throw error;
       }
     }
@@ -339,79 +401,12 @@ export class WalletManager {
 
   async getNetworkInfo() {
     try {
-      console.log("Fetching network info from:", APTOS_TESTNET_CONFIG.url);
       const response = await fetch(`${APTOS_TESTNET_CONFIG.url}`);
       const data = await response.json();
-      console.log("Network info:", data);
       return data;
     } catch (error) {
-      console.error("Failed to fetch network info:", error);
       return null;
     }
-  }
-
-  async debugWalletConnection() {
-    console.log("=== COMPREHENSIVE WALLET DEBUG INFO ===");
-    console.log("Current state:", JSON.stringify(this.state, null, 2));
-    console.log("Petra installed:", this.isPetraInstalled());
-    console.log(
-      "Session storage key exists:",
-      !!sessionStorage.getItem("aptosigma_wallet")
-    );
-
-    if (this.state.publicKey) {
-      console.log("=== BALANCE DEBUG WITH PUBLIC KEY ===");
-      console.log("Using public key for balance:", this.state.publicKey);
-
-      try {
-        // Test the balance endpoint directly
-        const balanceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${this.state.publicKey}/balance/0x1::aptos_coin::AptosCoin`;
-        console.log("Testing balance endpoint:", balanceUrl);
-
-        const response = await fetch(balanceUrl);
-        console.log("Balance endpoint response status:", response.status);
-        console.log(
-          "Balance endpoint response headers:",
-          Object.fromEntries(response.headers.entries())
-        );
-
-        if (response.ok) {
-          const data = await response.json();
-          console.log("Raw balance response:", JSON.stringify(data, null, 2));
-
-          console.log("Raw balance data being used everywhere:", data);
-        } else {
-          const errorText = await response.text();
-          console.log("Balance endpoint error response:", errorText);
-        }
-
-        // Also test with address if available
-        if (this.state.address && this.state.address !== this.state.publicKey) {
-          console.log(
-            "=== TESTING WITH ADDRESS (if different from public key) ==="
-          );
-          const addressBalanceUrl = `${APTOS_TESTNET_CONFIG.url}/accounts/${this.state.address}/balance/0x1::aptos_coin::AptosCoin`;
-          console.log("Testing address endpoint:", addressBalanceUrl);
-
-          const addressResponse = await fetch(addressBalanceUrl);
-          console.log("Address endpoint status:", addressResponse.status);
-
-          if (addressResponse.ok) {
-            const addressData = await addressResponse.json();
-            console.log(
-              "Address balance response:",
-              JSON.stringify(addressData, null, 2)
-            );
-          }
-        }
-      } catch (error) {
-        console.error("Error during balance debug:", error);
-      }
-    } else {
-      console.log("No public key available for balance testing");
-    }
-
-    console.log("=== END COMPREHENSIVE DEBUG INFO ===");
   }
 
   getState(): WalletState {
@@ -424,3 +419,6 @@ export class WalletManager {
 }
 
 export const walletManager = WalletManager.getInstance();
+export function useWallet() {
+  return walletManager;
+}

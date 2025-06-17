@@ -4,15 +4,17 @@ import { useState, useEffect } from 'react';
 import { walletManager, WalletState } from '@/lib/wallet';
 import WalletConnect from '@/components/WalletConnect';
 import HomePage from '@/components/HomePage';
+import StakingStep from '@/components/StakingStep';
 import StoryReveal from '@/components/StoryReveal';
 import UsernameEntry from '@/components/UsernameEntry';
 import GameInterface from '@/components/GameInterface';
 import GameComplete from '@/components/GameComplete';
 import GameFailed from '@/components/GameFailed';
 
-type GameState = 
+type GameState =
   | 'wallet-connect'
   | 'home'
+  | 'staking'
   | 'story-reveal'
   | 'username-entry'
   | 'game-playing'
@@ -32,18 +34,19 @@ export default function Home() {
 
   useEffect(() => {
     if (!mounted) return;
-    
+
     // Check for existing wallet connection and game state
     const existingWallet = walletManager.getState();
     const savedUsername = sessionStorage.getItem('aptosigma_username');
     const savedGameState = sessionStorage.getItem('aptosigma_game_state');
-    
+    const stakingComplete = sessionStorage.getItem('aptosigma_staking_complete');
+
     if (existingWallet.connected && existingWallet.address) {
       setWalletState(existingWallet);
-      
+
       if (savedUsername) {
         setUsername(savedUsername);
-        
+
         if (savedGameState) {
           const gameData = JSON.parse(savedGameState);
           if (gameData.gameComplete) {
@@ -53,11 +56,15 @@ export default function Home() {
           } else {
             setGameState('game-playing');
           }
+        } else if (stakingComplete) {
+          setGameState('game-playing'); // Default to playing if wallet + username + staking exist
         } else {
-          setGameState('game-playing'); // Default to playing if wallet + username exist
+          setGameState('staking'); // Need to stake first
         }
-      } else {
+      } else if (stakingComplete) {
         setGameState('username-entry');
+      } else {
+        setGameState('staking'); // Need to stake before username
       }
     }
   }, [mounted]);
@@ -68,6 +75,16 @@ export default function Home() {
   };
 
   const handleStartGame = () => {
+    // Check if already staked
+    const stakingComplete = sessionStorage.getItem('aptosigma_staking_complete');
+    if (stakingComplete) {
+      setGameState('story-reveal');
+    } else {
+      setGameState('staking');
+    }
+  };
+
+  const handleStakingComplete = () => {
     setGameState('story-reveal');
   };
 
@@ -108,21 +125,29 @@ export default function Home() {
   switch (gameState) {
     case 'wallet-connect':
       return <WalletConnect onConnected={handleWalletConnected} />;
-    
+
     case 'home':
       return (
-        <HomePage 
-          walletState={walletState!} 
-          onStartGame={handleStartGame} 
+        <HomePage
+          walletState={walletState!}
+          onStartGame={handleStartGame}
         />
       );
-    
+
+    case 'staking':
+      return (
+        <StakingStep
+          walletState={walletState!}
+          onStakingComplete={handleStakingComplete}
+        />
+      );
+
     case 'story-reveal':
       return <StoryReveal onContinue={handleStoryComplete} />;
-    
+
     case 'username-entry':
       return <UsernameEntry onUsernameSet={handleUsernameSet} />;
-    
+
     case 'game-playing':
       return (
         <GameInterface
@@ -132,18 +157,18 @@ export default function Home() {
           onGameFailed={handleGameFailed}
         />
       );
-    
+
     case 'game-complete':
       return (
-        <GameComplete 
-          finalStats={finalStats} 
-          username={username} 
+        <GameComplete
+          finalStats={finalStats}
+          username={username}
         />
       );
-    
+
     case 'game-failed':
       return <GameFailed />;
-    
+
     default:
       return <WalletConnect onConnected={handleWalletConnected} />;
   }
