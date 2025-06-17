@@ -36,6 +36,24 @@
   <img src="https://res.cloudinary.com/dmbxx03vp/image/upload/v1750156501/ChatGPT_Image_Jun_17_2025_03_31_24_PM_dcebsm.png" alt="Aptosigma 2025 Logo" width="500" />
 </p>
 
+# ☑️ Smart Contract Information
+
+```json
+{
+  "Result": {
+    "transaction_hash": "0xa15ac83fec3d7693c55992835fe8e7ac3f3d3486d61193aa411176f0f4d32d58",
+    "gas_used": 2862,
+    "gas_unit_price": 100,
+    "sender": "4afbef1832e39a9e7f4ca7434bcf216e4d2864f9da4003d2627558928ac30f54",
+    "sequence_number": 0,
+    "success": true,
+    "timestamp_us": 1750103141650536,
+    "version": 6787201921,
+    "vm_status": "Executed successfully"
+  }
+}
+```
+
 # ☑️ Setting Up the Project
 
 ## ▶️ Prerequisites
