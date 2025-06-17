@@ -100,6 +100,11 @@ http://localhost:3000
 - 🔴 **[Petra Wallet](https://petra.app/)**
 - 🔴 **[Rise In](https://risein.com/)**
 
+# ☑️ Issues
+<p>
+  Due to current issues with the deployment, <strong style="color:#F44336;">Aptosigma 2025</strong> cannot be accessed through the live environment. To continue testing and development without interruption, it is necessary to run the project <strong style="color:#00C896;">locally</strong>. Running locally allows developers to directly interact with the codebase, debug efficiently, and verify features before deployment. This approach ensures a stable and controlled environment for testing all functionalities, including blockchain integrations, staking mechanics, and user interactions. By setting up the project on a local machine, developers can maintain momentum and continue refining the game while resolving deployment issues in parallel.
+</p>
+
 # ☑️ Conclusion
 
 <p>
