@@ -5,6 +5,8 @@ import {
   getDoc,
   setDoc,
   serverTimestamp,
+  collection,
+  getDocs,
 } from "firebase/firestore";
 import { db } from "../firebase/init";
 
@@ -21,6 +23,17 @@ export interface UserGameData {
   currentSessionQuestions: number; // Track questions in current session
   highestScore: number; // Track personal best
   averageScore: number; // Calculate average performance
+}
+
+export interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number; // index of correct option
+  category?: string;
+  difficulty?: 'easy' | 'medium' | 'hard';
+  points?: number;
+  explanation?: string;
 }
 
 export class FirebaseGameService {
@@ -40,11 +53,12 @@ export class FirebaseGameService {
 
       if (userDoc.exists()) {
         const data = userDoc.data() as UserGameData;
-        
+
         // Calculate average score for display
-        const averageScore = data.totalGamesPlayed > 0 
-          ? Math.round(data.totalScore / data.totalGamesPlayed) 
-          : 0;
+        const averageScore =
+          data.totalGamesPlayed > 0
+            ? Math.round(data.totalScore / data.totalGamesPlayed)
+            : 0;
 
         return {
           ...data,
@@ -74,7 +88,7 @@ export class FirebaseGameService {
   ): Promise<UserGameData> {
     try {
       const userRef = this.getUserDocRef(walletAddress);
-      
+
       const initialData: UserGameData = {
         address: walletAddress,
         network,
@@ -92,7 +106,7 @@ export class FirebaseGameService {
 
       await setDoc(userRef, initialData);
       console.log("User initialized successfully");
-      
+
       return initialData;
     } catch (error) {
       console.error("Error initializing user:", error);
@@ -114,11 +128,17 @@ export class FirebaseGameService {
 
       if (userDoc.exists()) {
         const currentData = userDoc.data() as UserGameData;
-        
-        const newCurrentScore = (currentData.currentGameScore || 0) + additionalScore;
-        const newCurrentQuestions = (currentData.currentSessionQuestions || 0) + questionsAnswered;
-        const newTotalQuestions = (currentData.totalQuestionsPlayed || 0) + questionsAnswered;
-        const newHighestScore = Math.max(currentData.highestScore || 0, newCurrentScore);
+
+        const newCurrentScore =
+          (currentData.currentGameScore || 0) + additionalScore;
+        const newCurrentQuestions =
+          (currentData.currentSessionQuestions || 0) + questionsAnswered;
+        const newTotalQuestions =
+          (currentData.totalQuestionsPlayed || 0) + questionsAnswered;
+        const newHighestScore = Math.max(
+          currentData.highestScore || 0,
+          newCurrentScore
+        );
 
         await updateDoc(userRef, {
           currentGameScore: newCurrentScore,
@@ -128,7 +148,9 @@ export class FirebaseGameService {
           lastConnected: serverTimestamp(),
         });
 
-        console.log(`Progress updated: +${additionalScore} points, +${questionsAnswered} questions`);
+        console.log(
+          `Progress updated: +${additionalScore} points, +${questionsAnswered} questions`
+        );
       }
     } catch (error) {
       console.error("Error updating game progress:", error);
@@ -146,8 +168,9 @@ export class FirebaseGameService {
 
       if (userDoc.exists()) {
         const currentData = userDoc.data() as UserGameData;
-        
-        const newTotalScore = (currentData.totalScore || 0) + (currentData.currentGameScore || 0);
+
+        const newTotalScore =
+          (currentData.totalScore || 0) + (currentData.currentGameScore || 0);
         const newTotalGames = (currentData.totalGamesPlayed || 0) + 1;
         const newAverageScore = Math.round(newTotalScore / newTotalGames);
 
@@ -159,7 +182,9 @@ export class FirebaseGameService {
           lastConnected: serverTimestamp(),
         });
 
-        console.log("Session completed - data moved to totals, current session preserved");
+        console.log(
+          "Session completed - data moved to totals, current session preserved"
+        );
       }
     } catch (error) {
       console.error("Error completing session:", error);
@@ -235,12 +260,15 @@ export class FirebaseGameService {
   } | null> {
     try {
       const userData = await this.getUserGameData(walletAddress);
-      
+
       if (!userData) return null;
 
-      const questionsPerGame = userData.totalGamesPlayed > 0 
-        ? Math.round(userData.totalQuestionsPlayed / userData.totalGamesPlayed)
-        : 0;
+      const questionsPerGame =
+        userData.totalGamesPlayed > 0
+          ? Math.round(
+              userData.totalQuestionsPlayed / userData.totalGamesPlayed
+            )
+          : 0;
 
       return {
         totalScore: userData.totalScore,
@@ -259,13 +287,30 @@ export class FirebaseGameService {
     }
   }
 
+  
+
+  // Add this method to your FirebaseGameService
+  static async getQuestions(): Promise<QuizQuestion[]> {
+    try {
+      const questionsRef = collection(db, "questions");
+      const snapshot = await getDocs(questionsRef);
+      return snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as QuizQuestion[];
+    } catch (error) {
+      console.error("Error fetching questions:", error);
+      return [];
+    }
+  }
+
   /**
    * Get login welcome message with accumulated progress
    */
   static async getWelcomeMessage(walletAddress: string): Promise<string> {
     try {
       const stats = await this.getUserStats(walletAddress);
-      
+
       if (!stats) {
         return "Welcome to the game! Starting your journey...";
       }
@@ -281,10 +326,12 @@ export class FirebaseGameService {
       ];
 
       if (stats.currentSessionScore > 0) {
-        messages.push(`🔥 Continue your current session with ${stats.currentSessionScore} points!`);
+        messages.push(
+          `🔥 Continue your current session with ${stats.currentSessionScore} points!`
+        );
       }
 
-      return messages.join('\n');
+      return messages.join("\n");
     } catch (error) {
       console.error("Error generating welcome message:", error);
       return "Welcome back to the game!";

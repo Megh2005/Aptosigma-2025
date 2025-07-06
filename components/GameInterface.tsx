@@ -3,40 +3,46 @@
 import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { QUESTION_BANK, Question, LEVEL_CONFIG } from '@/lib/game-data';
 import { walletManager, WalletState } from '@/lib/wallet';
 import { FirebaseGameService } from '@/lib/firebase-game';
 import {
   Heart,
   Timer,
   Brain,
-  Lightbulb,
   Skull,
   Trophy,
   Coins,
-  Star,
-  Target
+  CheckCircle,
+  XCircle
 } from 'lucide-react';
 
 // Fixed time limit: 20 minutes (1200 seconds)
 const QUESTION_TIME_LIMIT = 1200;
 
+interface QuizQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  explanation: string;
+  isActive: boolean;
+  createdAt: any;
+}
+
 interface GameState {
-  level: 'easy' | 'medium' | 'hard' | 'expert';
   questionIndex: number;
-  sessionScore: number; // Current session score
-  currentSessionQuestions: number; // Questions answered in current session
+  sessionScore: number;
+  currentSessionQuestions: number;
   lives: number;
-  hintsUsed: number;
   totalTime: number;
-  currentQuestions: Question[];
-  showHint: boolean;
+  currentQuestions: QuizQuestion[];
   gameComplete: boolean;
   failed: boolean;
-  currentGameScore?: number; // Optional for displaying current score
+  selectedAnswer: number | null;
+  showResult: boolean;
+  isCorrect: boolean;
 }
 
 interface PersistentGameData {
@@ -61,17 +67,17 @@ export default function GameInterface({
   onGameFailed
 }: GameInterfaceProps) {
   const [gameState, setGameState] = useState<GameState>({
-    level: 'easy',
     questionIndex: 0,
     sessionScore: 0,
     currentSessionQuestions: 0,
     lives: 5,
-    hintsUsed: 0,
     totalTime: 0,
     currentQuestions: [],
-    showHint: false,
     gameComplete: false,
-    failed: false
+    failed: false,
+    selectedAnswer: null,
+    showResult: false,
+    isCorrect: false
   });
 
   const [persistentData, setPersistentData] = useState<PersistentGameData>({
@@ -82,14 +88,32 @@ export default function GameInterface({
     averageScore: 0
   });
 
-  const [currentAnswer, setCurrentAnswer] = useState('');
   const [timeLeft, setTimeLeft] = useState(QUESTION_TIME_LIMIT);
   const [loading, setLoading] = useState(false);
-  const [showResult, setShowResult] = useState(false);
-  const [isCorrect, setIsCorrect] = useState(false);
   const [firebaseLoading, setFirebaseLoading] = useState(false);
   const [showNoLivesPopup, setShowNoLivesPopup] = useState(false);
   const [welcomeMessage, setWelcomeMessage] = useState('');
+
+  // Function to fetch questions from Firebase
+  const fetchQuestionsFromFirebase = async (): Promise<QuizQuestion[]> => {
+    try {
+      // This would be your Firebase function to fetch questions
+      // Replace with actual Firebase questions collection fetch
+      const questionsSnapshot = await FirebaseGameService.getQuestions();
+      return (questionsSnapshot || []).map((q: any) => ({
+        id: q.id,
+        question: q.question,
+        options: q.options,
+        correctAnswer: q.correctAnswer,
+        explanation: q.explanation,
+        isActive: q.isActive ?? true,
+        createdAt: q.createdAt ?? null
+      }));
+    } catch (error) {
+      console.error('Error fetching questions:', error);
+      return [];
+    }
+  };
 
   // Function to handle when lives reach 0
   const handleNoLivesPopup = async () => {
@@ -152,9 +176,6 @@ export default function GameInterface({
             const remainingQuestions = getRemainingQuestions(userStats.totalQuestionsPlayed);
 
             if (remainingQuestions > 0) {
-              // Determine current level based on progress
-              const currentLevel = getCurrentLevel(userStats.totalQuestionsPlayed);
-
               setGameState(prev => ({
                 ...prev,
                 lives: userStats.lives,
@@ -162,7 +183,7 @@ export default function GameInterface({
                 currentSessionQuestions: userStats.currentSessionQuestions
               }));
 
-              initializeLevel(currentLevel, userStats.totalQuestionsPlayed);
+              await initializeQuestions(remainingQuestions);
             } else {
               // All questions completed
               handleGameCompletion(userStats);
@@ -172,8 +193,6 @@ export default function GameInterface({
             const remainingQuestions = getRemainingQuestions(userStats.totalQuestionsPlayed);
 
             if (remainingQuestions > 0) {
-              const startLevel = getCurrentLevel(userStats.totalQuestionsPlayed);
-
               setGameState(prev => ({
                 ...prev,
                 lives: userStats.lives,
@@ -181,7 +200,7 @@ export default function GameInterface({
                 currentSessionQuestions: 0
               }));
 
-              initializeLevel(startLevel, userStats.totalQuestionsPlayed);
+              await initializeQuestions(remainingQuestions);
             } else {
               // All questions completed
               handleGameCompletion(userStats);
@@ -192,7 +211,7 @@ export default function GameInterface({
         console.error('Error initializing game with Firebase:', error);
         // Fallback initialization
         setGameState(prev => ({ ...prev, lives: 5 }));
-        initializeLevel('easy', 0);
+        await initializeQuestions(20);
       } finally {
         setFirebaseLoading(false);
       }
@@ -201,12 +220,25 @@ export default function GameInterface({
     initializeGame();
   }, [walletState.address]);
 
-  // Determine current level based on total questions answered
-  const getCurrentLevel = (totalQuestions: number): 'easy' | 'medium' | 'hard' | 'expert' => {
-    if (totalQuestions < 5) return 'easy';
-    if (totalQuestions < 10) return 'medium';
-    if (totalQuestions < 15) return 'hard';
-    return 'expert';
+  // Initialize questions from Firebase
+  const initializeQuestions = async (questionsNeeded: number) => {
+    try {
+      const allQuestions = await fetchQuestionsFromFirebase();
+      const activeQuestions = allQuestions.filter(q => q.isActive);
+
+      // Shuffle and select questions
+      const shuffled = [...activeQuestions].sort(() => Math.random() - 0.5);
+      const selected = shuffled.slice(0, Math.min(questionsNeeded, shuffled.length));
+
+      setGameState(prev => ({
+        ...prev,
+        currentQuestions: selected,
+        questionIndex: 0
+      }));
+    } catch (error) {
+      console.error('Error initializing questions:', error);
+      // Fallback - could show error message
+    }
   };
 
   // Handle game completion
@@ -216,7 +248,6 @@ export default function GameInterface({
       questionsAnswered: stats.totalQuestionsPlayed,
       totalTime: 0,
       averageTime: 0,
-      hintsUsed: 0,
       livesLost: 5 - stats.lives,
       aptReward: (stats.totalScore * 0.01).toFixed(4),
       personalBest: stats.highestScore,
@@ -242,7 +273,6 @@ export default function GameInterface({
       try {
         setFirebaseLoading(true);
 
-        // Save current progress (accumulative)
         if (gameState.sessionScore > 0 || gameState.currentSessionQuestions > 0) {
           await FirebaseGameService.updateGameProgress(
             walletState.address,
@@ -257,9 +287,8 @@ export default function GameInterface({
       }
     };
 
-    // Only save if game has meaningful progress
     if (gameState.currentQuestions.length > 0 && gameState.currentSessionQuestions > 0) {
-      const timeoutId = setTimeout(saveToFirebase, 2000); // Debounce saves
+      const timeoutId = setTimeout(saveToFirebase, 2000);
       return () => clearTimeout(timeoutId);
     }
   }, [gameState.sessionScore, gameState.currentSessionQuestions, walletState.address]);
@@ -271,45 +300,37 @@ export default function GameInterface({
       const currentQuestion = gameState.currentQuestions[gameState.questionIndex];
       if (currentQuestion) {
         setTimeLeft(QUESTION_TIME_LIMIT);
-        setCurrentAnswer('');
-        setShowResult(false);
+        setGameState(prev => ({
+          ...prev,
+          selectedAnswer: null,
+          showResult: false,
+          isCorrect: false
+        }));
         setLoading(false);
-        setGameState(prev => ({ ...prev, showHint: false }));
       }
     }
   }, [gameState.questionIndex, gameState.currentQuestions]);
 
   // Timer effect
   useEffect(() => {
-    if (timeLeft > 0 && !showResult && !loading) {
+    if (timeLeft > 0 && !gameState.showResult && !loading) {
       const timer = setTimeout(() => {
         setTimeLeft(prev => prev - 1);
       }, 1000);
       return () => clearTimeout(timer);
-    } else if (timeLeft === 0 && !showResult && !loading && gameState.currentQuestions.length > 0) {
+    } else if (timeLeft === 0 && !gameState.showResult && !loading && gameState.currentQuestions.length > 0) {
       handleWrongAnswer();
     }
-  }, [timeLeft, showResult, loading, gameState.currentQuestions.length]);
+  }, [timeLeft, gameState.showResult, loading, gameState.currentQuestions.length]);
 
-  const initializeLevel = (level: 'easy' | 'medium' | 'hard' | 'expert', alreadyAnswered: number = 0) => {
-    const allQuestions = QUESTION_BANK.filter(q => q.level === level);
-    const remainingQuestions = getRemainingQuestions(alreadyAnswered);
+  const handleAnswerSelect = (answerIndex: number) => {
+    if (loading || gameState.showResult) return;
 
-    // Shuffle and take questions for this level
-    const shuffled = [...allQuestions].sort(() => Math.random() - 0.5);
-    const questionsToTake = Math.min(remainingQuestions, LEVEL_CONFIG[level].questionsPerLevel);
-    const selected = shuffled.slice(0, questionsToTake);
-
-    setGameState(prev => ({
-      ...prev,
-      level,
-      currentQuestions: selected,
-      questionIndex: 0
-    }));
+    setGameState(prev => ({ ...prev, selectedAnswer: answerIndex }));
   };
 
-  const handleAnswer = () => {
-    if (!currentAnswer.trim() || loading || gameState.currentQuestions.length === 0) return;
+  const handleSubmitAnswer = () => {
+    if (gameState.selectedAnswer === null || loading || gameState.currentQuestions.length === 0) return;
 
     setLoading(true);
 
@@ -319,16 +340,14 @@ export default function GameInterface({
       return;
     }
 
-    const isAnswerCorrect = currentAnswer.toLowerCase().trim() === currentQuestion.answer;
+    const isAnswerCorrect = gameState.selectedAnswer === currentQuestion.correctAnswer;
+    const questionScore = isAnswerCorrect ? 3 : 0; // 3 points for correct answer
 
-    setIsCorrect(isAnswerCorrect);
-    setShowResult(true);
-
-    // Calculate time-based score
-    const timeBonus = Math.max(0, timeLeft / QUESTION_TIME_LIMIT);
-    const baseScore = isAnswerCorrect ? 20 : 0;
-    const hintPenalty = gameState.showHint ? 3 : 0;
-    const questionScore = Math.max(0, Math.round(baseScore * (0.5 + 0.5 * timeBonus) - hintPenalty));
+    setGameState(prev => ({
+      ...prev,
+      isCorrect: isAnswerCorrect,
+      showResult: true
+    }));
 
     setTimeout(() => {
       if (isAnswerCorrect) {
@@ -347,8 +366,8 @@ export default function GameInterface({
       if (walletState.address) {
         await FirebaseGameService.updateGameProgress(
           walletState.address,
-          questionScore, // Add this score
-          1 // Add one question
+          questionScore,
+          1
         );
       }
 
@@ -357,8 +376,7 @@ export default function GameInterface({
         ...gameState,
         sessionScore: gameState.sessionScore + questionScore,
         currentSessionQuestions: gameState.currentSessionQuestions + 1,
-        totalTime: gameState.totalTime + timeSpent,
-        hintsUsed: gameState.hintsUsed + (gameState.showHint ? 1 : 0)
+        totalTime: gameState.totalTime + timeSpent
       };
 
       // Update persistent data
@@ -381,7 +399,6 @@ export default function GameInterface({
           questionsAnswered: totalAnswered,
           totalTime: newGameState.totalTime,
           averageTime: newGameState.totalTime / totalAnswered,
-          hintsUsed: newGameState.hintsUsed,
           livesLost: 5 - newGameState.lives,
           aptReward: ((persistentData.totalScore + questionScore) * 0.01).toFixed(4),
           personalBest: Math.max(persistentData.highestScore, persistentData.totalScore + questionScore),
@@ -390,31 +407,13 @@ export default function GameInterface({
 
         onGameComplete(finalStats);
       } else if (gameState.questionIndex + 1 >= gameState.currentQuestions.length) {
-        // Current level complete, move to next level
-        const levels = ['easy', 'medium', 'hard', 'expert'] as const;
-        const currentLevelIndex = levels.indexOf(gameState.level);
-
-        if (currentLevelIndex < levels.length - 1) {
-          // Next level
-          const nextLevel = levels[currentLevelIndex + 1];
-          const remainingQuestions = getRemainingQuestions(totalAnswered);
-
-          if (remainingQuestions > 0) {
-            const levelQuestions = QUESTION_BANK.filter(q => q.level === nextLevel);
-            const shuffled = [...levelQuestions].sort(() => Math.random() - 0.5);
-            const questionsToTake = Math.min(remainingQuestions, LEVEL_CONFIG[nextLevel].questionsPerLevel);
-            const selected = shuffled.slice(0, questionsToTake);
-
-            setGameState({
-              ...newGameState,
-              level: nextLevel,
-              currentQuestions: selected,
-              questionIndex: 0
-            });
-          }
+        // Need more questions
+        const remainingQuestions = getRemainingQuestions(totalAnswered);
+        if (remainingQuestions > 0) {
+          await initializeQuestions(remainingQuestions);
         }
       } else {
-        // Next question in current level
+        // Next question
         setGameState({
           ...newGameState,
           questionIndex: gameState.questionIndex + 1
@@ -422,7 +421,6 @@ export default function GameInterface({
       }
     } catch (error) {
       console.error('Error handling correct answer:', error);
-      // Continue with local state even if Firebase fails
       setGameState({
         ...gameState,
         sessionScore: gameState.sessionScore + questionScore,
@@ -441,7 +439,6 @@ export default function GameInterface({
       const newLives = gameState.lives - 1;
 
       if (newLives <= 0) {
-        // Lose life in Firebase
         if (walletState.address) {
           await FirebaseGameService.loseLife(walletState.address);
         }
@@ -451,45 +448,22 @@ export default function GameInterface({
           lives: 0,
           failed: true
         }));
-        // The useEffect will handle showing the popup
       } else {
-        // Update lives in Firebase
         if (walletState.address) {
           await FirebaseGameService.loseLife(walletState.address);
         }
 
-        // Continue with fewer lives
         const updatedGameState = {
           ...gameState,
           lives: newLives,
           totalTime: gameState.totalTime + timeSpent
         };
 
-        // Move to next question or level
         if (gameState.questionIndex + 1 >= gameState.currentQuestions.length) {
           const remainingQuestions = getRemainingQuestions(persistentData.totalQuestionsAnswered);
-
           if (remainingQuestions > 0) {
-            const levels = ['easy', 'medium', 'hard', 'expert'] as const;
-            const currentLevelIndex = levels.indexOf(gameState.level);
-
-            if (currentLevelIndex < levels.length - 1) {
-              // Move to next level
-              const nextLevel = levels[currentLevelIndex + 1];
-              const levelQuestions = QUESTION_BANK.filter(q => q.level === nextLevel);
-              const shuffled = [...levelQuestions].sort(() => Math.random() - 0.5);
-              const questionsToTake = Math.min(remainingQuestions, LEVEL_CONFIG[nextLevel].questionsPerLevel);
-              const selected = shuffled.slice(0, questionsToTake);
-
-              setGameState({
-                ...updatedGameState,
-                level: nextLevel,
-                currentQuestions: selected,
-                questionIndex: 0
-              });
-            }
+            await initializeQuestions(remainingQuestions);
           } else {
-            // All questions completed
             await handleGameCompletion({
               totalScore: persistentData.totalScore,
               totalQuestionsPlayed: persistentData.totalQuestionsAnswered,
@@ -500,7 +474,6 @@ export default function GameInterface({
             });
           }
         } else {
-          // Next question
           setGameState({
             ...updatedGameState,
             questionIndex: gameState.questionIndex + 1
@@ -509,7 +482,6 @@ export default function GameInterface({
       }
     } catch (error) {
       console.error('Error handling wrong answer:', error);
-      // Continue with local state
       setGameState(prev => ({
         ...prev,
         lives: Math.max(0, prev.lives - 1),
@@ -521,18 +493,13 @@ export default function GameInterface({
   };
 
   const resetQuestion = () => {
-    setShowResult(false);
+    setGameState(prev => ({
+      ...prev,
+      showResult: false,
+      selectedAnswer: null,
+      isCorrect: false
+    }));
     setLoading(false);
-  };
-
-  const handleShowHint = () => {
-    setGameState(prev => ({ ...prev, showHint: true }));
-  };
-
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      handleAnswer();
-    }
   };
 
   // Early return if no lives popup is showing
@@ -553,7 +520,7 @@ export default function GameInterface({
               <br />
               <div className="grid grid-cols-2 gap-4 text-left">
                 <div>Questions: {persistentData.totalQuestionsAnswered}/20</div>
-                <div>Score: {gameState.currentGameScore} PTS</div>
+                <div>Score: {gameState.sessionScore} PTS</div>
               </div>
               <br />
               All progress is preserved. Your session will continue when you return.
@@ -604,7 +571,7 @@ export default function GameInterface({
         <Card className="cryptic-border bg-black p-8 max-w-md w-full text-center">
           <div className="w-16 h-16 border-4 border-white rotating-loader mx-auto mb-4"></div>
           <div className="terminal-text text-sm opacity-80">
-            Accessing the Phantom Ledger...
+            Loading questions from the Phantom Ledger...
             {welcomeMessage && (
               <div className="mt-4 text-left whitespace-pre-line">
                 {welcomeMessage}
@@ -627,20 +594,25 @@ export default function GameInterface({
 
   const progress = (persistentData.totalQuestionsAnswered / 20) * 100;
 
-  if (showResult) {
+  if (gameState.showResult) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <Card className="cryptic-border bg-black p-8 max-w-md w-full text-center">
-          <div className={`text-6xl mb-6 ${isCorrect ? 'text-green-500' : 'text-red-500'}`}>
-            {isCorrect ? <Trophy /> : <Skull />}
+          <div className={`text-6xl mb-6 ${gameState.isCorrect ? 'text-green-500' : 'text-red-500'}`}>
+            {gameState.isCorrect ? <CheckCircle /> : <XCircle />}
           </div>
           <div className="gothic-text text-2xl mb-4">
-            {isCorrect ? 'CIPHER DECODED' : 'INCORRECT CIPHER'}
+            {gameState.isCorrect ? 'CORRECT!' : 'INCORRECT!'}
           </div>
           <div className="terminal-text text-sm opacity-80 mb-4">
-            {isCorrect ? 'The Phantom Ledger accepts your wisdom...' : 'The Phantom Ledger rejects your offering...'}
+            {gameState.isCorrect ? 'You earned 3 points!' : 'You lost a life!'}
           </div>
-          {isCorrect && (
+          {currentQuestion.explanation && (
+            <div className="terminal-text text-sm mb-4 p-3 bg-gray-800 rounded">
+              <strong>Explanation:</strong> {currentQuestion.explanation}
+            </div>
+          )}
+          {gameState.isCorrect && (
             <div className="terminal-text text-sm text-green-400 mb-4">
               Progress: {persistentData.totalQuestionsAnswered + 1}/20 questions
               <br />
@@ -673,10 +645,6 @@ export default function GameInterface({
                 <Coins size={16} />
                 <span className="terminal-text text-sm">{gameState.sessionScore} PTS</span>
               </div>
-              {gameState.sessionScore > 0 && (
-                <div className="flex items-center gap-1 text-green-400">
-                </div>
-              )}
             </div>
           </div>
 
@@ -703,7 +671,7 @@ export default function GameInterface({
         <div className="mt-4">
           <div className="flex justify-between text-sm terminal-text mb-2">
             <span>Progress: {persistentData.totalQuestionsAnswered}/20</span>
-            <span>Level: {LEVEL_CONFIG[gameState.level].name}</span>
+            <span>3 points per question</span>
           </div>
           <Progress value={progress} className="h-2" />
         </div>
@@ -712,68 +680,46 @@ export default function GameInterface({
       {/* Question */}
       <Card className="cryptic-border bg-black p-8 mb-6">
         <div className="space-y-6">
-          {/* Story */}
-          <div className="terminal-text text-sm opacity-80 italic text-center p-4 border border-gray-700 rounded">
-            {currentQuestion.story}
-          </div>
-
           {/* Question */}
           <div className="text-center">
             <div className="flex items-center justify-center gap-2 mb-4">
               <Brain size={24} />
-              <span className="gothic-text text-xl">CIPHER #{persistentData.totalQuestionsAnswered + 1}</span>
+              <span className="gothic-text text-xl">QUESTION #{persistentData.totalQuestionsAnswered + 1}</span>
             </div>
             <div className="terminal-text text-lg leading-relaxed">
               {currentQuestion.question}
             </div>
           </div>
 
-          {/* Hint */}
-          {gameState.showHint && currentQuestion.hints && (
-            <div className="cryptic-border bg-yellow-900/20 p-4 rounded text-center">
-              <div className="flex items-center justify-center gap-2 mb-2">
-                <Lightbulb size={16} className="text-yellow-500" />
-                <span className="terminal-text text-sm text-yellow-500">HINT REVEALED (-3 POINTS)</span>
-              </div>
-              <div className="terminal-text text-sm opacity-80">
-                {currentQuestion.hints[0]}
-              </div>
-            </div>
-          )}
-
-          {/* Answer Input */}
-          <div className="space-y-4">
-            <Input
-              type="text"
-              placeholder="enter cipher solution..."
-              value={currentAnswer}
-              onChange={(e) => setCurrentAnswer(e.target.value.toLowerCase())}
-              onKeyPress={handleKeyPress}
-              className="bg-black border-white text-white terminal-text text-center text-lg terminal-cursor"
-              disabled={loading}
-            />
-
-            <div className="flex justify-center gap-4">
-              {!gameState.showHint && currentQuestion.hints && (
-                <Button
-                  onClick={handleShowHint}
-                  variant="outline"
-                  className="terminal-text"
-                  disabled={loading}
-                >
-                  <Lightbulb className="mr-2" size={16} />
-                  REVEAL HINT (-3 PTS)
-                </Button>
-              )}
-
+          {/* Options */}
+          <div className="space-y-3">
+            {currentQuestion.options.map((option, index) => (
               <Button
-                onClick={handleAnswer}
-                disabled={!currentAnswer.trim() || loading}
-                className="bg-white text-black hover:bg-gray-200 terminal-text px-8"
+                key={index}
+                onClick={() => handleAnswerSelect(index)}
+                variant={gameState.selectedAnswer === index ? "default" : "outline"}
+                className={`w-full text-left p-4 h-auto ${gameState.selectedAnswer === index
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-transparent border-white text-white hover:bg-gray-800'
+                  }`}
+                disabled={loading}
               >
-                SUBMIT CIPHER
+                <span className="terminal-text">
+                  {String.fromCharCode(65 + index)}. {option}
+                </span>
               </Button>
-            </div>
+            ))}
+          </div>
+
+          {/* Submit Button */}
+          <div className="flex justify-center">
+            <Button
+              onClick={handleSubmitAnswer}
+              disabled={gameState.selectedAnswer === null || loading}
+              className="bg-white text-black hover:bg-gray-200 terminal-text px-8"
+            >
+              SUBMIT ANSWER
+            </Button>
           </div>
         </div>
       </Card>
